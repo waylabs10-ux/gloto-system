@@ -24,8 +24,11 @@ export function AuthModal({ isOpen, onClose, initialMode = 'login' }: AuthModalP
   // Reset state when modal opens/changes mode
   useEffect(() => {
     if (isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMode(initialMode);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setError(null);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPassword('');
     }
   }, [isOpen, initialMode]);
@@ -37,25 +40,42 @@ export function AuthModal({ isOpen, onClose, initialMode = 'login' }: AuthModalP
 
     try {
       if (mode === 'register') {
-        const { error: signUpError } = await supabase.auth.signUp({
+        const { data, error: signUpError } = await supabase.auth.signUp({
           email,
           password,
         });
-        if (signUpError) throw signUpError;
-        router.push('/dashboard');
-        onClose();
+        
+        if (signUpError) {
+          throw signUpError;
+        } else if (!data.session) {
+          throw new Error('Email no confirmado. Por favor revisa tu bandeja o desactiva "Confirm Email" en Supabase > Authentication > Providers > Email.');
+        }
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
-        if (signInError) throw signInError;
-        router.push('/dashboard');
-        onClose();
+        
+        if (signInError) {
+          throw signInError;
+        }
       }
+      
+      router.push('/dashboard');
+      onClose();
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Ocurrió un error en la autenticación.');
+      let errorMessage = err?.message || 'Ocurrió un error en la autenticación.';
+      if (errorMessage.includes('Invalid login credentials')) {
+        errorMessage = 'Tu correo o contraseña son incorrectos. Si es tu primera vez aquí, haz clic en "¿No tienes cuenta? Regístrate aquí" abajo para crearla.';
+      } else if (errorMessage.includes('already registered')) {
+        errorMessage = 'Este correo ya está registrado. Por favor cambia a la opción "Iniciar Sesión".';
+      } else if (errorMessage.includes('Email not confirmed') || errorMessage.includes('Email no confirmado')) {
+        errorMessage = 'Debes confirmar tu correo electrónico. (Tip: Puedes desactivar la confirmación en tu panel de Supabase > Authentication > Providers > Email).';
+      } else if (errorMessage.includes('email rate limit exceeded') || errorMessage.includes('rate limit')) {
+        errorMessage = 'Límite de intentos excedido. Por favor, desactiva "Confirm Email" en Supabase Auth > Providers > Email para continuar probando sin límites de correo.';
+      }
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

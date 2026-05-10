@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { Product, ProductDependency, BusinessProfile } from '@/types/database';
+import { Product, ProductDependency, BusinessProfile, InventoryTransaction } from '@/types/database';
 
 // --- BUSINESS PROFILES ---
 
@@ -84,7 +84,7 @@ export async function createPublicOrder(businessId: string, total: number, items
   // Since RLS allows insert to public, we can insert order, then items
   const { data: order, error: orderErr } = await supabase
     .from('orders')
-    .insert([{ business_id: businessId, total, estado: 'pendiente' }])
+    .insert([{ business_id: businessId, total, estado: 'completada' }])
     .select()
     .single();
     
@@ -297,3 +297,93 @@ export async function updateOrderStatus(orderId: string, status: string) {
   if (error) throw error;
   return data;
 }
+
+// --- DASHBOARD ANALYTICS ---
+
+export async function fetchLowStockAlerts(businessId: string) {
+  // We use the view, but filter by business_id
+  const { data, error } = await supabase
+    .from('low_stock_alerts')
+    .select('*')
+    .eq('business_id', businessId)
+    .order('stock_actual', { ascending: true });
+
+  if (error) throw error;
+  return data as Product[];
+}
+
+export async function fetchTransactionsWithFilters(
+  businessId: string, 
+  filters: { startDate?: Date, endDate?: Date, search?: string, tipo?: string, motivo?: string }
+) {
+  let query = supabase
+    .from('inventory_transactions')
+    .select(`
+      *,
+      product:products(*)
+    `)
+    .eq('business_id', businessId)
+    .order('created_at', { ascending: false });
+
+  if (filters.startDate) {
+    query = query.gte('created_at', filters.startDate.toISOString());
+  }
+  if (filters.endDate) {
+    const endOfDay = new Date(filters.endDate);
+    endOfDay.setHours(23, 59, 59, 999);
+    query = query.lte('created_at', endOfDay.toISOString());
+  }
+  if (filters.tipo && filters.tipo !== 'all') {
+    query = query.eq('tipo', filters.tipo);
+  }
+  if (filters.motivo && filters.motivo !== 'all') {
+    query = query.eq('motivo', filters.motivo);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  let result = data as InventoryTransaction[];
+
+  if (filters.search) {
+    const s = filters.search.toLowerCase();
+    result = result.filter(tx => tx.product && tx.product.nombre.toLowerCase().includes(s));
+  }
+
+  return result;
+}
+
+export async function fetchSalesVsConsumptionStats(businessId: string) {
+  const today = new Date();
+  const lastWeek = new Date(today);
+  lastWeek.setDate(lastWeek.getDate() - 7);
+  lastWeek.setHours(0, 0, 0, 0); // Start of day 7 days ago
+
+  // Get orders from last 7 days
+  const { data: ordersData, error: ordersError } = await supabase
+    .from('orders')
+    .select(`
+      id, created_at,
+      items:order_items(cantidad, product:products(nombre))
+    `)
+    .eq('business_id', businessId)
+    .gte('created_at', lastWeek.toISOString());
+
+  if (ordersError) throw ordersError;
+
+  // Get ingredient transactions with motivo='venta' from last 7 days
+  const { data: invData, error: invError } = await supabase
+    .from('inventory_transactions')
+    .select(`
+      created_at, cantidad, tipo, product:products(nombre, unidad_medida)
+    `)
+    .eq('business_id', businessId)
+    .eq('motivo', 'venta')
+    .gte('created_at', lastWeek.toISOString());
+
+  if (invError) throw invError;
+
+  return { sales: ordersData, consumption: invData };
+}
+
+

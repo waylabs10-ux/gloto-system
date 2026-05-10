@@ -3,8 +3,9 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { getMyBusiness, saveBusinessProfile, checkSlug } from '@/lib/api';
+import { seedDemoData } from '@/lib/seedData';
 import { BusinessProfile } from '@/types/database';
-import { Loader2, Save, Store, Upload } from 'lucide-react';
+import { Loader2, Save, Store, Upload, PlayCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 export default function SettingsPage() {
@@ -22,6 +23,7 @@ export default function SettingsPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [seeding, setSeeding] = useState(false);
 
   const router = useRouter();
 
@@ -113,6 +115,23 @@ export default function SettingsPage() {
       setError(err.message || 'Ocurrió un error al guardar el perfil.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSeed = async () => {
+    if (!profile.id) return;
+    if (!confirm('Esto creará productos, recetas y movimientos de prueba. ¿Continuar?')) return;
+    
+    setSeeding(true);
+    setError('');
+    setSuccess('');
+    try {
+      await seedDemoData(profile.id);
+      setSuccess('¡Datos de prueba generados correctamente! Ve a tu panel para verlos.');
+    } catch (err: any) {
+      setError(err.message || 'Error al generar datos de prueba.');
+    } finally {
+      setSeeding(false);
     }
   };
 
@@ -232,7 +251,16 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          <div className="pt-6 border-t border-gray-100 flex justify-end">
+          <div className="pt-6 border-t border-gray-100 flex justify-between items-center">
+            <button
+              type="button"
+              onClick={handleSeed}
+              disabled={seeding || !profile.id}
+              className="px-6 py-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl font-bold flex items-center gap-2 transition-colors disabled:opacity-50"
+            >
+              {seeding ? <Loader2 className="w-5 h-5 animate-spin" /> : <PlayCircle className="w-5 h-5" />}
+              Generar Datos de Prueba
+            </button>
             <button
               type="submit"
               disabled={saving || !!slugError}
